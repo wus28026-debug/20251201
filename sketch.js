@@ -35,6 +35,31 @@ let posX, posY;
 let facing = 1; // 1 = right, -1 = left
 let movingLeft = false;
 let movingRight = false;
+let canvasElem = null;
+let inputElem = null; // p5 input element for dialog
+let dialogActive = false;
+
+// all7 sprite (13 frames, total size ~3219x290)
+const ALL7_FRAME_COUNT = 13;
+let all7Sheet = null;
+let leftSprite = null;
+const LEFT_X = () => Math.floor(width / 3); // 畫面 1/3 的 x 座標
+const LEFT_SCALE = 0.85; // left (all7) 縮小比例
+// all8 sprite (14 frames, total size ~5231x425)
+const ALL8_FRAME_COUNT = 14;
+let all8Sheet = null;
+let rightSprite = null;
+const RIGHT_X = () => Math.floor((2 * width) / 3); // 畫面 2/3 的 x 座標
+// all9 sprite (10 frames, total size ~2085x273) - used when player is near
+const ALL9_FRAME_COUNT = 10;
+let all9Sheet = null;
+// all10 weapon sprite (assumption: default 6 frames if unknown)
+const ALL10_FRAME_COUNT = 6;
+let all10Sheet = null;
+let projectiles = [];
+const PROJ_SPEED = 600; // px/s
+// 接近判定距離（像素）
+const PROXIMITY_DIST = 160;
 
 function preload() {
   // 嘗試幾個常見路徑（root, 1/, 2/）以提高成功率
@@ -43,6 +68,11 @@ function preload() {
   const walkPaths = ['all2.png', '1/all2.png', '2/all2.png', '3/all2.png', '4/all2.png'];
   const jumpPaths = ['all4.png', '1/all4.png', '2/all4.png', '3/all4.png', '4/all4.png'];
   const spacePaths = ['all3.png', '1/all3.png', '2/all3.png', '3/all3.png', '4/all3.png'];
+
+  const all7Paths = ['all7.png', '1/all7.png', '2/all7.png', '3/all7.png', '4/all7.png', '7/all7.png'];
+  const all8Paths = ['all8.png', '1/all8.png', '2/all8.png', '3/all8.png', '4/all8.png', '8/all8.png'];
+  const all9Paths = ['all9.png', '1/all9.png', '2/all9.png', '3/all9.png', '4/all9.png', '9/all9.png'];
+  const all10Paths = ['all10.png', '1/all10.png', '2/all10.png', '3/all10.png', '4/all10.png', '10/all10.png'];
 
   function tryLoadPaths(paths, assignCallback, i = 0) {
     if (i >= paths.length) return;
@@ -57,20 +87,36 @@ function preload() {
   tryLoadPaths(walkPaths, (img, p) => { walkSheet = img; /*walkLoadedPath = p;*/ });
   tryLoadPaths(jumpPaths, (img, p) => { jumpSheet = img; });
   tryLoadPaths(spacePaths, (img, p) => { spaceSheet = img; });
+  tryLoadPaths(all7Paths, (img, p) => { all7Sheet = img; });
+  tryLoadPaths(all8Paths, (img, p) => { all8Sheet = img; });
+  tryLoadPaths(all9Paths, (img, p) => { all9Sheet = img; });
+  tryLoadPaths(all10Paths, (img, p) => { all10Sheet = img; });
 }
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  canvasElem = createCanvas(windowWidth, windowHeight);
   imageMode(CENTER);
   noSmooth();
   posX = width / 2;
   posY = height / 2;
+  // 建立隱藏的輸入框，用於 leftSprite 的對話輸入
+  inputElem = createInput('');
+  inputElem.attribute('placeholder', '在此輸入...');
+  inputElem.size(200);
+  inputElem.hide();
+  // 監聽 Enter 鍵送出
+  inputElem.elt.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleDialogSubmit();
+    }
+  });
 }
 
 function draw() {
-  background('#ffd6ff');
+  background('#fefae0');
 
-  // 必要：idle 必須載入才能看到東西
+  // 顯示 idle 圖片載入狀態，但不要阻止 all7 精靈顯示
   if (!idleSheet || !idleSheet.width) {
     push();
     fill(0);
@@ -78,7 +124,7 @@ function draw() {
     textSize(16);
     text('loading all1.png...', width / 2, height / 2);
     pop();
-    return;
+    // 不 return，繼續執行，讓 spawnedSprites 能在缺少 idle 時仍被產生並繪製
   }
 
   // 決定使用哪個 sprite（移動時用 walkSheet，否則用 idle）
@@ -94,6 +140,19 @@ function draw() {
 
   // 更新位置
   const dt = deltaTime / 1000;
+  // 初始化單一 leftSprite（如果圖片已載入且尚未建立），固定在畫面左側中間
+  if (all7Sheet && all7Sheet.width && !leftSprite) {
+    leftSprite = new NonControlledSprite(LEFT_X(), height / 2, all7Sheet, ALL7_FRAME_COUNT);
+    // 放慢 left sprite 動畫
+    leftSprite.animFPS = Math.max(4, Math.floor(ANIM_FPS * 0.5));
+  }
+  // 初始化右側精靈（all8）
+  if (all8Sheet && all8Sheet.width && !rightSprite) {
+    rightSprite = new NonControlledSprite(RIGHT_X(), height / 2, all8Sheet, ALL8_FRAME_COUNT);
+    // 放慢 right sprite 動畫
+    rightSprite.animFPS = Math.max(4, Math.floor(ANIM_FPS * 0.5));
+    rightSprite.dialogText = '';
+  }
   if (movingRight) {
     facing = 1;
     posX += SPEED * dt;
@@ -166,12 +225,145 @@ function draw() {
   const sx = currentFrame * frameW;
   const sy = 0;
 
-  // 繪製（鏡像處理）
+  // 更新並繪製左側的單一精靈（不受鍵盤控制），位置以主角為基準往左偏移
+  if (leftSprite) {
+    leftSprite.update(dt);
+    // 若主角靠近 leftSprite，暫時切換到 all9
+    const distLeft = Math.abs(posX - LEFT_X());
+    if (all9Sheet && distLeft <= PROXIMITY_DIST) {
+      leftSprite.useTemporarySheet(all9Sheet, ALL9_FRAME_COUNT);
+      // 顯示對話框與輸入框
+      dialogActive = true;
+      if (inputElem) {
+        // 放在 leftSprite 上方
+        const canvasLeft = canvasElem.elt.getBoundingClientRect().left;
+        const canvasTop = canvasElem.elt.getBoundingClientRect().top;
+        const inputX = Math.floor(canvasLeft + LEFT_X() - 100); // 置中輸入框
+        // 計算 left 顯示高度（根據原始影格高度與 LEFT_SCALE）
+        const leftOrigH = (leftSprite && leftSprite._origFrameH) ? leftSprite._origFrameH : frameH;
+        const displayH_local = Math.floor(leftOrigH * LEFT_SCALE);
+        const inputY = Math.floor(canvasTop + height / 2 - displayH_local - 60);
+        inputElem.position(inputX, inputY);
+        inputElem.show();
+        inputElem.elt.focus();
+      }
+      // 當 leftSprite 被觸發時，讓 rightSprite 的文字持續顯示（如果存在）
+      if (rightSprite) rightSprite.alwaysShow = true;
+    } else {
+      leftSprite.restoreOriginalSheet();
+      dialogActive = false;
+      if (inputElem) {
+        inputElem.hide();
+      }
+      if (rightSprite) rightSprite.alwaysShow = false;
+    }
+    // 左側顯示尺寸：以原始來源影格為基準進行縮放
+    const leftOrigW = (leftSprite && leftSprite._origFrameW) ? leftSprite._origFrameW : frameW;
+    const leftOrigH = (leftSprite && leftSprite._origFrameH) ? leftSprite._origFrameH : frameH;
+    const leftDisplayW = Math.floor(leftOrigW * LEFT_SCALE);
+    const leftDisplayH = Math.floor(leftOrigH * LEFT_SCALE);
+    // 繪製左側精靈（縮小顯示）
+    leftSprite.draw(LEFT_X(), height / 2, leftDisplayW, leftDisplayH);
+  }
+
+  // 更新並繪製投射物
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.update(dt);
+    p.draw();
+    // 檢查與 left/right 碰撞（簡單 AABB）
+    if (leftSprite && p.alive) {
+      const dx = Math.abs(p.x - LEFT_X());
+      const dy = Math.abs(p.y - height / 2);
+      const lw = (leftSprite._origFrameW || frameW) / 2;
+      const lh = (leftSprite._origFrameH || frameH) / 2;
+      const pw = (p.frameW_source || 20) / 2;
+      const ph = (p.frameH_source || 20) / 2;
+      if (dx <= lw + pw && dy <= lh + ph) {
+        // 碰撞：觸發 left 播放 all9 一次並移除投射物
+        if (all9Sheet) leftSprite.useTemporarySheet(all9Sheet, ALL9_FRAME_COUNT, true);
+        p.alive = false;
+      }
+    }
+    if (rightSprite && p.alive) {
+      const dx = Math.abs(p.x - RIGHT_X());
+      const dy = Math.abs(p.y - height / 2);
+      const rw = (rightSprite._origFrameW || frameW) / 2;
+      const rh = (rightSprite._origFrameH || frameH) / 2;
+      const pw = (p.frameW_source || 20) / 2;
+      const ph = (p.frameH_source || 20) / 2;
+      if (dx <= rw + pw && dy <= rh + ph) {
+        if (all9Sheet) rightSprite.useTemporarySheet(all9Sheet, ALL9_FRAME_COUNT, true);
+        p.alive = false;
+      }
+    }
+    if (!p.alive) projectiles.splice(i, 1);
+  }
+
+  // 更新並繪製右側的單一精靈（不受鍵盤控制），固定在畫面右側
+  if (rightSprite) {
+    rightSprite.update(dt);
+    // 若主角靠近 rightSprite，暫時切換到 all9
+    const distRight = Math.abs(posX - RIGHT_X());
+    if (all9Sheet && distRight <= PROXIMITY_DIST) {
+      rightSprite.useTemporarySheet(all9Sheet, ALL9_FRAME_COUNT);
+    } else {
+      rightSprite.restoreOriginalSheet();
+    }
+  // 右側與左側共用顯示大小（若 leftSprite 已存在，使用其 frameW/frameH）
+  // 右側目標大小：使用 left 的原始來源影格大小（不含 LEFT_SCALE），以保持右側大小不受 left 縮小影響
+  const targetW = (leftSprite && leftSprite._origFrameW) ? leftSprite._origFrameW : frameW;
+  const targetH = (leftSprite && leftSprite._origFrameH) ? leftSprite._origFrameH : frameH;
+    // 若主角移到 all7 左邊（posX < LEFT_X()），則把右側角色左右反向顯示
+    const shouldFlip = (posX < LEFT_X());
+    rightSprite.draw(RIGHT_X(), height / 2, targetW, targetH, shouldFlip);
+  }
+
+  // 繪製主角（鏡像處理）
   push();
   translate(posX, posY);
   if (facing < 0) scale(-1, 1);
   image(activeSheet, 0, 0, frameW, frameH, sx, sy, frameW, frameH);
   pop();
+
+  // 繪製 leftSprite 的對話框文字（當接近時）
+  if (dialogActive && leftSprite) {
+    const bubbleX = LEFT_X();
+    const bubbleY = height / 2 - ( (leftSprite && leftSprite.frameH) ? leftSprite.frameH : frameH) / 2 - 40;
+    push();
+    rectMode(CENTER);
+    fill(255);
+    stroke(0);
+    strokeWeight(1);
+    rect(bubbleX, bubbleY, 220, 36, 6);
+    noStroke();
+    fill(0);
+    textAlign(CENTER, CENTER);
+    textSize(14);
+    text('需要我解答嗎?', bubbleX, bubbleY);
+    pop();
+  }
+
+  // 繪製 rightSprite 的對話文字（若有）
+  if (rightSprite && (rightSprite.dialogText || rightSprite.alwaysShow)) {
+    const bubbleX = RIGHT_X();
+    const bubbleY = height / 2 - ( (rightSprite && rightSprite.frameH) ? rightSprite.frameH : frameH) / 2 - 40;
+    push();
+    rectMode(CENTER);
+    // 背景顏色 d6ccc2
+    fill('#d6ccc2');
+    stroke(0);
+    strokeWeight(1);
+    textAlign(CENTER, CENTER);
+    textSize(14);
+    const txt = rightSprite.dialogText || '';
+    const w = max(80, textWidth(txt) + 20);
+    rect(bubbleX, bubbleY, w, 36, 6);
+    noStroke();
+    fill(0);
+    text(txt, bubbleX, bubbleY);
+    pop();
+  }
 }
 
 function windowResized() {
@@ -216,6 +408,13 @@ function keyPressed() {
       currentFrame = 0;
       animAccumulator = 0;
     }
+  } else if (keyCode === DOWN_ARROW) {
+    // 發射投射物（all10），若找不到 all10 圖檔則發射一個 fallback 投射物（用簡單圖形顯示）
+    const startX = posX + (facing > 0 ? (frameW / 2 + 10) : -(frameW / 2 + 10));
+    const projSheet = (all10Sheet && all10Sheet.width) ? all10Sheet : null;
+    const projFrameCount = (all10Sheet && all10Sheet.width) ? ALL10_FRAME_COUNT : 1;
+    const proj = new Projectile(startX, posY, facing * PROJ_SPEED, 0, projSheet, projFrameCount);
+    projectiles.push(proj);
   }
 }
 
@@ -228,5 +427,192 @@ function keyReleased() {
     movingLeft = false;
     currentFrame = 0;
     animAccumulator = 0;
+  }
+}
+
+// 處理對話輸入提交
+function handleDialogSubmit() {
+  if (!inputElem) return;
+  const val = inputElem.value().trim();
+  if (val.length === 0) return;
+  // 將輸入文字傳給 rightSprite，加上 "，歡迎你"
+  if (rightSprite) {
+    rightSprite.dialogText = val + '，歡迎你';
+  }
+  // 清空並隱藏輸入框
+  inputElem.value('');
+  inputElem.hide();
+  dialogActive = false;
+}
+
+// 非受鍵盤控制的角色類別，支援任意 sprite sheet 與 frame count
+class NonControlledSprite {
+  // sheet: p5.Image, frameCount: number
+  constructor(x, y, sheet = null, frameCount = ALL7_FRAME_COUNT) {
+    this.x = x;
+    this.y = y;
+    this.sheet = sheet;
+    // keep original sheet/frameCount to allow temporary switching
+    this._origSheet = sheet;
+    this._origFrameCount = frameCount;
+    this.frame = 0;
+    this.acc = 0;
+    this.frameCount = frameCount;
+    // 預設尺寸（當 sheet 尚未可用時使用近似值）
+    const approxTotalW = (frameCount === ALL8_FRAME_COUNT) ? 5231 : 3219;
+    const approxH = (frameCount === ALL8_FRAME_COUNT) ? 425 : 290;
+    this.frameW = sheet && sheet.width ? Math.floor(sheet.width / this.frameCount) : Math.floor(approxTotalW / this.frameCount);
+    this.frameH = sheet && sheet.height ? sheet.height : approxH;
+    // 保存原始顯示尺寸（來源影格寬高的顯示參考）
+    this._origFrameW = this.frameW;
+    this._origFrameH = this.frameH;
+    // 來源影格尺寸（用於計算來源裁切 sx, sy）
+    this.frameW_source = this.frameW;
+    this.frameH_source = this.frameH;
+    this._usingTemp = false;
+    this.animFPS = ANIM_FPS;
+  }
+
+  update(dt) {
+    // 如果圖片尚未載入，跳過計時（但會嘗試修正尺寸）
+    if (this.sheet && this.sheet.width) {
+      // 更新來源影格寬高
+      this.frameW_source = Math.floor(this.sheet.width / this.frameCount);
+      this.frameH_source = this.sheet.height;
+      // 若未處於臨時切換，更新顯示尺寸與原始尺寸參考
+      if (!this._usingTemp) {
+        this.frameW = this.frameW_source;
+        this.frameH = this.frameH_source;
+        this._origFrameW = this.frameW;
+        this._origFrameH = this.frameH;
+      }
+    }
+    this.acc += dt;
+    const frameDuration = 1 / this.animFPS;
+    if (this.acc >= frameDuration) {
+      const adv = Math.floor(this.acc / frameDuration);
+      this.frame = (this.frame + adv) % this.frameCount;
+      this.acc -= adv * frameDuration;
+    }
+    // if playing once, advance timer and restore when done
+    if (this._playOnce) {
+      this._playOnceTimer += dt;
+      if (this._playOnceTimer >= this._playOnceTotalTime) {
+        this._playOnce = false;
+        this._playOnceTimer = 0;
+        // restore original sheet after finishing
+        this.restoreOriginalSheet();
+      }
+    }
+  }
+
+  // draw(x?, y?, w?, h?) 可選參數以覆蓋位置與大小
+  draw() {
+    if (!this.sheet || !this.sheet.width) return;
+    // 使用來源影格寬度計算 sx（來源影格寬度與顯示寬度分離）
+    const sx = this.frame * this.frameW_source;
+    const sy = 0;
+    const useX = (typeof arguments[0] === 'number') ? arguments[0] : this.x;
+    const useY = (typeof arguments[1] === 'number') ? arguments[1] : this.y;
+    // 若使用者傳入目標顯示大小，使用之；否則使用顯示寬高（若處於臨時 sheet，顯示大小仍為原始 _origFrameW/_origFrameH）
+    const useW = (typeof arguments[2] === 'number') ? arguments[2] : (this._usingTemp ? this._origFrameW : this.frameW);
+    const useH = (typeof arguments[3] === 'number') ? arguments[3] : (this._usingTemp ? this._origFrameH : this.frameH);
+    const flip = (typeof arguments[4] === 'boolean') ? arguments[4] : this.flipped;
+    push();
+    translate(useX, useY);
+    if (flip) scale(-1, 1);
+    // draw image: destination size useW/useH, source rect sx,sy,this.frameW_source,this.frameH_source
+    image(this.sheet, 0, 0, useW, useH, sx, sy, this.frameW_source, this.frameH_source);
+    pop();
+  }
+
+  // 暫時使用另一個 sprite sheet（例如 all9），會改變 frameCount
+  useTemporarySheet(sheet, frameCount) {
+    if (!sheet) return;
+    this.sheet = sheet;
+    this.frameCount = frameCount;
+    this._usingTemp = true;
+    // 設定來源影格寬高，但保留原始顯示尺寸（_origFrameW/_origFrameH）
+    if (this.sheet && this.sheet.width) {
+      this.frameW_source = Math.floor(this.sheet.width / this.frameCount);
+      this.frameH_source = this.sheet.height;
+    }
+    // 若第三參數為 true，代表要播放一次後恢復
+    const playOnce = (arguments.length >= 3) ? arguments[2] : false;
+    if (playOnce) {
+      this._playOnce = true;
+      this._playOnceTimer = 0;
+      this._playOnceTotalTime = this.frameCount / this.animFPS;
+    } else {
+      this._playOnce = false;
+      this._playOnceTimer = 0;
+      this._playOnceTotalTime = 0;
+    }
+  }
+
+  // 恢復成原本的 sheet/frameCount
+  restoreOriginalSheet() {
+    this.sheet = this._origSheet;
+    this.frameCount = this._origFrameCount;
+    this._usingTemp = false;
+    if (this.sheet && this.sheet.width) {
+      this.frameW_source = Math.floor(this.sheet.width / this.frameCount);
+      this.frameH_source = this.sheet.height;
+      this.frameW = this.frameW_source;
+      this.frameH = this.frameH_source;
+      this._origFrameW = this.frameW;
+      this._origFrameH = this.frameH;
+    }
+  }
+}
+
+// 投射物類別，使用 sprite sheet
+class Projectile {
+  constructor(x, y, vx, vy, sheet, frameCount = ALL10_FRAME_COUNT) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.sheet = sheet;
+    this.frameCount = frameCount;
+    this.frame = 0;
+    this.acc = 0;
+    this.frameW_source = (sheet && sheet.width) ? Math.floor(sheet.width / frameCount) : 20;
+    this.frameH_source = (sheet && sheet.height) ? sheet.height : 20;
+    this.frameW = this.frameW_source;
+    this.frameH = this.frameH_source;
+    this.animFPS = ANIM_FPS;
+    this.alive = true;
+  }
+
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.acc += dt;
+    const frameDuration = 1 / this.animFPS;
+    if (this.acc >= frameDuration) {
+      const adv = Math.floor(this.acc / frameDuration);
+      this.frame = (this.frame + adv) % this.frameCount;
+      this.acc -= adv * frameDuration;
+    }
+    // 若超過畫面邊界則死亡
+    if (this.x < -100 || this.x > width + 100) this.alive = false;
+  }
+
+  draw() {
+    if (!this.sheet || !this.sheet.width) {
+      // fallback visual when no sprite sheet is available: draw a small circle
+      push();
+      noStroke();
+      fill(80, 160, 255);
+      ellipse(this.x, this.y, 16, 16);
+      pop();
+      return;
+    }
+    const sx = this.frame * this.frameW_source;
+    push();
+    translate(this.x, this.y);
+    image(this.sheet, 0, 0, this.frameW, this.frameH, sx, 0, this.frameW_source, this.frameH_source);
+    pop();
   }
 }
