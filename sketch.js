@@ -39,6 +39,12 @@ let canvasElem = null;
 let inputElem = null; // p5 input element for dialog
 let dialogActive = false;
 
+// --- 測驗遊戲變數 ---
+let quizTable = null;
+let currentQuestionRow = null;
+let quizState = 'IDLE'; // 'IDLE', 'ASKING', 'SHOWING_FEEDBACK'
+let feedbackTimer = 0;
+
 // all7 sprite (13 frames, total size ~3219x290)
 const ALL7_FRAME_COUNT = 13;
 let all7Sheet = null;
@@ -74,6 +80,9 @@ function preload() {
   const all9Paths = ['all9.png', '1/all9.png', '2/all9.png', '3/all9.png', '4/all9.png', '9/all9.png'];
   const all10Paths = ['all10.png', '1/all10.png', '2/all10.png', '3/all10.png', '4/all10.png', '10/all10.png'];
 
+  // 載入測驗題庫
+  quizTable = loadTable('quiz.csv', 'csv', 'header');
+
   function tryLoadPaths(paths, assignCallback, i = 0) {
     if (i >= paths.length) return;
     const p = paths[i];
@@ -101,8 +110,10 @@ function setup() {
   posY = height / 2;
   // 建立隱藏的輸入框，用於 leftSprite 的對話輸入
   inputElem = createInput('');
-  inputElem.attribute('placeholder', '在此輸入...');
-  inputElem.size(200);
+  inputElem.attribute('placeholder', '在此輸入...'); // 將提示文字設為 placeholder
+  inputElem.size(280); // 調整輸入框寬度以填滿背景
+  inputElem.style('background-color', '#FFDDDD'); // 設定輸入框本身的背景為淺粉色
+  inputElem.style('border', '1px solid #969696'); // 加上一個細邊框，讓它更清晰
   inputElem.hide();
   // 監聽 Enter 鍵送出
   inputElem.elt.addEventListener('keydown', (e) => {
@@ -229,33 +240,43 @@ function draw() {
   if (leftSprite) {
     leftSprite.update(dt);
     // 若主角靠近 leftSprite，暫時切換到 all9
-    const distLeft = Math.abs(posX - LEFT_X());
-    if (all9Sheet && distLeft <= PROXIMITY_DIST) {
+    const distLeft = Math.abs(posX - LEFT_X());    
+    if (all9Sheet && distLeft <= PROXIMITY_DIST && quizState === 'IDLE') {
       leftSprite.useTemporarySheet(all9Sheet, ALL9_FRAME_COUNT);
-      // 顯示對話框與輸入框
+      // --- 觸發問答 ---
+      quizState = 'ASKING';
+      askNewQuestion(); // 提出新問題
       dialogActive = true;
       if (inputElem) {
         // 放在 leftSprite 上方
         const canvasLeft = canvasElem.elt.getBoundingClientRect().left;
         const canvasTop = canvasElem.elt.getBoundingClientRect().top;
-        const inputX = Math.floor(canvasLeft + LEFT_X() - 100); // 置中輸入框
-        // 計算 left 顯示高度（根據原始影格高度與 LEFT_SCALE）
         const leftOrigH = (leftSprite && leftSprite._origFrameH) ? leftSprite._origFrameH : frameH;
         const displayH_local = Math.floor(leftOrigH * LEFT_SCALE);
-        const inputY = Math.floor(canvasTop + height / 2 - displayH_local - 60);
+        // 將輸入框定位在對話氣泡下方
+        const inputX = Math.floor(canvasLeft + LEFT_X() - 145); // 調整X座標以置中
+        const inputY = Math.floor(canvasTop + height / 2 - displayH_local - 5);
         inputElem.position(inputX, inputY);
         inputElem.show();
         inputElem.elt.focus();
-      }
-      // 當 leftSprite 被觸發時，讓 rightSprite 的文字持續顯示（如果存在）
+      }      
       if (rightSprite) rightSprite.alwaysShow = true;
-    } else {
-      leftSprite.restoreOriginalSheet();
-      dialogActive = false;
-      if (inputElem) {
-        inputElem.hide();
+
+    } else if (distLeft > PROXIMITY_DIST) {
+      // 如果玩家遠離，且不是在顯示回饋的狀態，則重置
+      if (quizState !== 'SHOWING_FEEDBACK') {
+        leftSprite.restoreOriginalSheet();
+        dialogActive = false;
+        if (inputElem) inputElem.hide();
+        if (rightSprite) {
+          rightSprite.alwaysShow = false;
+          rightSprite.dialogText = ''; // 清空右側對話
+        }
+        quizState = 'IDLE';
       }
-      if (rightSprite) rightSprite.alwaysShow = false;
+    } else {
+      // 玩家在範圍內，但可能已經在回答問題或看回饋
+      leftSprite.useTemporarySheet(all9Sheet, ALL9_FRAME_COUNT);
     }
     // 左側顯示尺寸：以原始來源影格為基準進行縮放
     const leftOrigW = (leftSprite && leftSprite._origFrameW) ? leftSprite._origFrameW : frameW;
@@ -264,6 +285,15 @@ function draw() {
     const leftDisplayH = Math.floor(leftOrigH * LEFT_SCALE);
     // 繪製左側精靈（縮小顯示）
     leftSprite.draw(LEFT_X(), height / 2, leftDisplayW, leftDisplayH);
+  }
+
+  // 如果正在顯示回饋，則計時
+  if (quizState === 'SHOWING_FEEDBACK') {
+    feedbackTimer += dt;
+    if (feedbackTimer > 3) { // 顯示回饋 3 秒
+      quizState = 'IDLE';
+      feedbackTimer = 0;
+    }
   }
 
   // 更新並繪製投射物
@@ -327,21 +357,25 @@ function draw() {
   pop();
 
   // 繪製 leftSprite 的對話框文字（當接近時）
-  if (dialogActive && leftSprite) {
+  if (leftSprite) {
     const bubbleX = LEFT_X();
     const bubbleY = height / 2 - ( (leftSprite && leftSprite.frameH) ? leftSprite.frameH : frameH) / 2 - 40;
-    push();
-    rectMode(CENTER);
-    fill(255);
-    stroke(0);
-    strokeWeight(1);
-    rect(bubbleX, bubbleY, 220, 36, 6);
-    noStroke();
-    fill(0);
-    textAlign(CENTER, CENTER);
-    textSize(14);
-    text('需要我解答嗎?', bubbleX, bubbleY);
-    pop();
+
+    if (dialogActive) {
+        // 繪製觸發者的對話氣泡
+        push();
+        rectMode(CENTER);
+        fill(255);
+        stroke(0);
+        strokeWeight(1);
+        rect(bubbleX, bubbleY, 220, 36, 6);
+        noStroke();
+        fill(0);
+        textAlign(CENTER, CENTER);
+        textSize(14);
+        text('請回答右邊的問題！', bubbleX, bubbleY);
+        pop();
+    }
   }
 
   // 繪製 rightSprite 的對話文字（若有）
@@ -356,7 +390,7 @@ function draw() {
     strokeWeight(1);
     textAlign(CENTER, CENTER);
     textSize(14);
-    const txt = rightSprite.dialogText || '';
+    const txt = rightSprite.dialogText || '...';
     const w = max(80, textWidth(txt) + 20);
     rect(bubbleX, bubbleY, w, 36, 6);
     noStroke();
@@ -364,6 +398,16 @@ function draw() {
     text(txt, bubbleX, bubbleY);
     pop();
   }
+
+  // 在畫布左上角顯示學號與姓名（覆蓋在最上層）
+  push();
+  textAlign(LEFT, TOP);
+  textSize(20);
+  fill(0);
+  noStroke();
+  // 若想微調位置，可更改 x,y（目前為距離邊緣 8px）
+  text('41470027 王瑀瑄', 8, 8);
+  pop();
 }
 
 function windowResized() {
@@ -435,14 +479,37 @@ function handleDialogSubmit() {
   if (!inputElem) return;
   const val = inputElem.value().trim();
   if (val.length === 0) return;
-  // 將輸入文字傳給 rightSprite，加上 "，歡迎你"
-  if (rightSprite) {
-    rightSprite.dialogText = val + '，歡迎你';
+
+  // --- 檢查答案 ---
+  if (quizState === 'ASKING' && currentQuestionRow) {
+    const correctAnswer = currentQuestionRow.getString('答案');
+    if (val === correctAnswer) {
+      rightSprite.dialogText = currentQuestionRow.getString('答對時的回饋');
+    } else {
+      rightSprite.dialogText = currentQuestionRow.getString('答錯時的回饋');
+    }
+    quizState = 'SHOWING_FEEDBACK';
+    feedbackTimer = 0; // 重置回饋計時器
   }
+
   // 清空並隱藏輸入框
   inputElem.value('');
   inputElem.hide();
   dialogActive = false;
+}
+
+// --- 測驗遊戲函式 ---
+
+/**
+ * 從 CSV 中隨機抽取一個新問題並顯示在右邊角色上
+ */
+function askNewQuestion() {
+  const randomIndex = floor(random(quizTable.getRowCount()));
+  currentQuestionRow = quizTable.getRow(randomIndex);
+  const questionText = currentQuestionRow.getString('題目');
+  if (rightSprite) {
+    rightSprite.dialogText = questionText;
+  }
 }
 
 // 非受鍵盤控制的角色類別，支援任意 sprite sheet 與 frame count
