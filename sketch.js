@@ -28,7 +28,15 @@ const BG_FOREST_PATHS = [
 ];
 let bgFlower = null; // 花海背景
 let bgWonderland = null; // 仙境背景
-let sceneStage = 1; // 1: 樹林, 2: 花海, 3: 仙境
+let bgStart = null; // 主畫面背景
+let bgEnd = null; // 結束畫面背景
+let startButton = null; // 開始按鈕
+let bgMusicAudio = null; // 背景音樂 (HTML5 Audio)
+let viewNotesButton = null; // 查看筆記按鈕
+let tryAgainButton = null; // 重試按鈕
+let playAgainButton = null; // 再玩一次按鈕
+let notesContainer = null; // 筆記容器
+let sceneStage = 0; // 0: 主畫面, 1: 樹林, 2: 花海, 3: 仙境
 
 let idleSheet = null; // all1.png
 let walkSheet = null; // all2.png
@@ -110,6 +118,14 @@ let all11_2Sheet = null; // 仙境場景第二階段角色 (11/2/all2.png)
 const ALL11_2_FRAME_COUNT = 18;
 let scene2CorrectCount = 0; // 第二階段答對題數
 let scene2RewardTriggered = false; // 是否已觸發第二階段獎勵
+let scene3CorrectCount = 0; // 第三階段答對題數
+let gameEnded = false; // 遊戲結束旗標
+let playerKeys = 3; // 玩家擁有的鑰匙數量 (闖關者模式)
+let screenShakeTimer = 0; // 螢幕震動計時器
+let screenShakeAmount = 0; // 螢幕震動強度
+let screenFlashTimer = 0; // 螢幕閃爍計時器
+let screenFlashColor = null; // 螢幕閃爍顏色
+let gameOverSoundPlayed = false; // 遊戲結束音效旗標
 let all13Sheet = null; // 仙境場景的新角色
 const ALL13_FRAME_COUNT = 26;
 let all13State = 'WAITING'; // WAITING, DESCENDING, IDLE
@@ -132,6 +148,9 @@ function preload() {
   const all9Paths = ['all9.png', '1/all9.png', '2/all9.png', '3/all9.png', '4/all9.png', '9/all9.png'];
   const all10Paths = ['all10.png', '1/all10.png', '2/all10.png', '3/all10.png', '4/all10.png', '10/all10.png'];
 
+  // all14 sprite (第三階段左側精靈)
+  const all14Paths = ['14/all14.png', 'all14.png', '14/all14.jpg', '14/all14.png'];
+  
   // 載入獎勵小精靈圖片 (12/1/all1.png)
   loadImage('12/1/all1.png', img => { rewardSheet = img; }, () => console.log('Reward sprite not found'));
 
@@ -146,6 +165,12 @@ function preload() {
 
   // 載入仙境背景
   loadImage('背景/仙境.jpg', img => { bgWonderland = img; }, () => console.log('Wonderland bg not found'));
+
+  // 載入主畫面背景
+  const startBgPaths = ['背景/開始.jpg', '背景/開始.png', 'background/開始.jpg', 'background/開始.png'];
+  // (稍後在 tryLoadPaths 定義後呼叫)
+  // 載入結束畫面背景
+  const endBgPaths = ['背景/結束.jpg', '背景/結束.png', 'background/結束.jpg', 'background/結束.png'];
 
   // 載入測驗題庫
   quizTable = loadTable('quiz.csv', 'csv', 'header');
@@ -176,6 +201,10 @@ function preload() {
     console.log('background image assigned from', p);
     bgForest = img; 
   });
+
+  // 嘗試載入主畫面背景
+  tryLoadPaths(startBgPaths, (img, p) => { bgStart = img; });
+  tryLoadPaths(endBgPaths, (img, p) => { bgEnd = img; });
   
   tryLoadPaths(idlePaths, (img, p) => { idleSheet = img; /*idleLoadedPath = p;*/ });
   tryLoadPaths(walkPaths, (img, p) => { walkSheet = img; /*walkLoadedPath = p;*/ });
@@ -185,9 +214,13 @@ function preload() {
   tryLoadPaths(all8Paths, (img, p) => { all8Sheet = img; });
   tryLoadPaths(all9Paths, (img, p) => { all9Sheet = img; });
   tryLoadPaths(all10Paths, (img, p) => { all10Sheet = img; });
-  // 嘗試載入 all14（資料夾 14 中的 all14.png）
-  // const all14Paths = ['14/all14.png', 'all14.png', '14/all14.jpg'];
-  // tryLoadPaths(all14Paths, (img, p) => { all14Sheet = img; });
+  tryLoadPaths(all14Paths, (img, p) => { 
+    console.log('loaded all14 from', p);
+    all14Sheet = img; 
+  });
+   // 嘗試載入 all14（資料夾 14 中的 all14.png）
+   // const all14Paths = ['14/all14.png', 'all14.png', '14/all14.jpg'];
+   // tryLoadPaths(all14Paths, (img, p) => { all14Sheet = img; });
 }
 
 function setup() {
@@ -212,6 +245,163 @@ function setup() {
     }
   });
 
+  // 建立開始按鈕
+  startButton = createButton('開始遊戲');
+  startButton.position(width / 2 - 60, height / 2 + 100); // 置中偏下
+  startButton.size(120, 50);
+  startButton.style('font-size', '20px');
+  startButton.style('background-color', '#ffffff');
+  startButton.style('border-radius', '10px');
+  startButton.style('cursor', 'pointer');
+  startButton.style('border', '2px solid #000');
+  startButton.mousePressed(() => {
+    playSound('click.mp3');
+
+    // 播放背景音樂 (使用 HTML5 Audio 以避免網頁卡住)
+    if (!bgMusicAudio) {
+      bgMusicAudio = new Audio('15/背景音樂.mp3');
+      bgMusicAudio.loop = true;
+      bgMusicAudio.volume = 0.4; // 音量設為 0.4 避免太吵
+      bgMusicAudio.play().catch(e => console.log('Music play error:', e));
+    }
+
+    sceneStage = 1; // 進入第一關
+    playerKeys = 3; // 重置鑰匙數量
+    startButton.hide();
+  });
+
+  // 建立重試按鈕 (失敗時顯示)
+  tryAgainButton = createButton('Try again');
+  tryAgainButton.position(width / 2 - 60, height / 2 + 100);
+  tryAgainButton.size(120, 50);
+  tryAgainButton.style('font-size', '20px');
+  tryAgainButton.style('background-color', '#ffcccc'); // 淡紅色背景
+  tryAgainButton.style('border-radius', '10px');
+  tryAgainButton.style('cursor', 'pointer');
+  tryAgainButton.style('border', '2px solid #000');
+  tryAgainButton.hide();
+  tryAgainButton.mousePressed(() => {
+    playSound('click.mp3');
+    // 重置遊戲狀態
+    playerKeys = 3;
+    sceneStage = 1;
+    gameEnded = false;
+    gameOverSoundPlayed = false;
+    correctAnswerCount = 0;
+    scene2CorrectCount = 0;
+    scene3CorrectCount = 0;
+    posX = width / 2;
+    posY = baselineY;
+    
+    tryAgainButton.hide();
+    viewNotesButton.hide();
+    if (playAgainButton) playAgainButton.hide();
+    
+    // 重新開始迴圈
+    loop();
+    // 確保題庫重置 (可選)
+    askNewQuestion();
+  });
+
+  // 建立 Play Again 按鈕 (通關後顯示)
+  playAgainButton = createButton('Play again');
+  playAgainButton.position(width / 2 - 60, height / 2 + 160); // 放在查看筆記下方
+  playAgainButton.size(120, 50);
+  playAgainButton.style('font-size', '20px');
+  playAgainButton.style('background-color', '#ccffcc'); // 淡綠色背景
+  playAgainButton.style('border-radius', '10px');
+  playAgainButton.style('cursor', 'pointer');
+  playAgainButton.style('border', '2px solid #000');
+  playAgainButton.hide();
+  playAgainButton.mousePressed(() => {
+    playSound('click.mp3');
+    // 重置遊戲狀態
+    playerKeys = 3;
+    sceneStage = 1;
+    gameEnded = false;
+    gameOverSoundPlayed = false;
+    correctAnswerCount = 0;
+    scene2CorrectCount = 0;
+    scene3CorrectCount = 0;
+    posX = width / 2;
+    posY = baselineY;
+    
+    // 額外重置變數以確保回到第一階段初始狀態
+    ridingMode = false;
+    rewardSprite = null;
+    leftSprite = null; // 強制重置左側角色 (draw 中會重新建立 all7)
+    if (rightSprite) {
+      rightSprite.dialogText = '';
+      rightSprite.alwaysShow = false;
+      rightSprite.restoreOriginalSheet();
+    }
+    projectiles = [];
+    effects = [];
+    spaceKeyCount = 0;
+    scene2RewardTriggered = false;
+    all11State = 'WAITING';
+    all11Y = -150;
+    all13State = 'WAITING';
+    all13Y = -150;
+    screenShakeTimer = 0;
+    screenFlashTimer = 0;
+    
+    if (tryAgainButton) tryAgainButton.hide();
+    if (viewNotesButton) viewNotesButton.hide();
+    playAgainButton.hide();
+    
+    // 重新開始迴圈
+    loop();
+    askNewQuestion();
+  });
+
+  // 建立查看筆記按鈕 (通關後顯示)
+  viewNotesButton = createButton('查看筆記');
+  viewNotesButton.position(width / 2 - 60, height / 2 + 100); // 位置在遊戲結束文字下方
+  viewNotesButton.size(120, 50);
+  viewNotesButton.style('font-size', '20px');
+  viewNotesButton.style('background-color', '#ffffff');
+  viewNotesButton.style('border-radius', '10px');
+  viewNotesButton.style('cursor', 'pointer');
+  viewNotesButton.style('border', '2px solid #000');
+  viewNotesButton.hide();
+  viewNotesButton.mousePressed(() => {
+    if (notesContainer) notesContainer.style('display', 'flex');
+  });
+
+  // 建立筆記 iframe 容器 (全螢幕覆蓋)
+  notesContainer = createDiv('');
+  notesContainer.position(0, 0);
+  notesContainer.size(windowWidth, windowHeight);
+  notesContainer.style('background-color', 'rgba(0,0,0,0.8)');
+  notesContainer.style('display', 'none'); // 預設隱藏
+  notesContainer.style('justify-content', 'center');
+  notesContainer.style('align-items', 'center');
+  notesContainer.style('flex-direction', 'column');
+  notesContainer.style('z-index', '10000');
+
+  const iframe = createElement('iframe');
+  iframe.attribute('src', 'https://hackmd.io/nhhulwzpQ3CBudmJjMim2g');
+  iframe.style('width', '90%');
+  iframe.style('height', '85%');
+  iframe.style('border', 'none');
+  iframe.style('background', 'white');
+  iframe.style('border-radius', '8px');
+  iframe.parent(notesContainer);
+
+  const closeBtn = createButton('關閉筆記');
+  closeBtn.size(120, 40);
+  closeBtn.style('margin-top', '15px');
+  closeBtn.style('font-size', '18px');
+  closeBtn.style('cursor', 'pointer');
+  closeBtn.style('background-color', '#ffdddd');
+  closeBtn.style('border-radius', '5px');
+  closeBtn.style('border', '1px solid #000');
+  closeBtn.parent(notesContainer);
+  closeBtn.mousePressed(() => {
+    notesContainer.style('display', 'none');
+  });
+
   // 初始化可用題目索引列表
   if (quizTable) {
     for (let i = 0; i < quizTable.getRowCount(); i++) {
@@ -221,6 +411,119 @@ function setup() {
 }
 
 function draw() {
+  // --- 主畫面邏輯 ---
+  if (sceneStage === 0) {
+    if (bgStart && bgStart.width) {
+      push();
+      imageMode(CORNER);
+      image(bgStart, 0, 0, width, height);
+      pop();
+    } else {
+      background(220);
+      // 若圖片未載入，顯示簡單背景
+    }
+
+    // 顯示遊戲標題
+    push();
+    textAlign(CENTER, CENTER);
+    textSize(60); // 縮小一點
+    textFont('Segoe Script'); // 改用較細的草寫字體
+    fill(100); // 改為灰色
+    text("Hidden Gem", width / 2, height / 2 - 50); // 稍微下移
+    pop();
+
+    return; // 停留在主畫面，不執行後續遊戲邏輯
+  }
+
+  // --- 遊戲結束邏輯 ---
+  if (gameEnded) {
+    // 播放結束音效 (只播一次)
+    if (!gameOverSoundPlayed) {
+      if (playerKeys <= 0) playSound('fail.mp3');
+      else playSound('win.mp3');
+      gameOverSoundPlayed = true;
+    }
+
+    // 震動效果 (延續之前的邏輯，讓失敗時的震動能播放)
+    if (screenShakeTimer > 0) {
+      const shake = screenShakeAmount * (screenShakeTimer / 0.5); // 隨時間遞減
+      translate(random(-shake, shake), random(-shake, shake));
+      screenShakeTimer -= deltaTime / 1000;
+    }
+
+    push();
+    if (bgEnd && bgEnd.width) {
+      imageMode(CORNER);
+      image(bgEnd, 0, 0, width, height);
+    } else {
+      rectMode(CORNER);
+      // 若失敗則顯示帶紅色的背景，否則黑色
+      if (playerKeys <= 0) {
+        fill(50, 0, 0, 200); // 深紅色半透明
+      } else {
+        fill(0, 200); // 半透明黑色背景
+      }
+      rect(0, 0, width, height);
+    }
+
+    // 更新並繪製特效 (讓特效在結束畫面也能播放)
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const e = effects[i];
+      e.update(deltaTime / 1000);
+      e.draw();
+      if (e.finished) {
+        if (typeof e.onFinish === 'function') e.onFinish();
+        effects.splice(i, 1);
+      }
+    }
+
+    fill(255);
+    textSize(60);
+    textAlign(CENTER, CENTER);
+    if (playerKeys <= 0) {
+      fill('#FFB6C1'); // 淺粉色
+      textFont('Segoe Script'); // 跟主畫面一樣的草寫字體
+      text("Fail", width / 2, height / 2);
+      if (tryAgainButton) tryAgainButton.show();
+      if (viewNotesButton) viewNotesButton.hide();
+      if (playAgainButton) playAgainButton.hide();
+      
+      // 失敗特效：持續產生紅色爆炸
+      if (frameCount % 10 === 0 && all10Sheet && all10Sheet.width) {
+         const ex = random(width * 0.1, width * 0.9);
+         const ey = random(height * 0.1, height * 0.9);
+         const s = random(1.0, 3.0);
+         // 爆炸特效 (原色)
+         const e = new Effect(ex, ey, all10Sheet, ALL10_FRAME_COUNT, null, 0, s);
+         effects.push(e);
+      }
+    } else {
+      fill('#FFD700'); // 金色
+      textFont('Segoe Script');
+      text("Finish", width / 2, height / 2);
+      if (viewNotesButton) viewNotesButton.show();
+      if (tryAgainButton) tryAgainButton.hide();
+      if (playAgainButton) playAgainButton.show();
+      
+      // 勝利特效：持續產生彩色煙火 (粒子效果，非爆炸圖)
+      if (frameCount % 15 === 0) {
+         const ex = random(width * 0.1, width * 0.9);
+         const ey = random(height * 0.1, height * 0.8);
+         const f = new Firework(ex, ey);
+         effects.push(f);
+      }
+    }
+    pop();
+    return; // 結束畫面時不執行後續遊戲邏輯
+  }
+
+  // 震動效果 (答錯時觸發)
+  if (screenShakeTimer > 0) {
+    const shake = screenShakeAmount * (screenShakeTimer / 0.5); // 隨時間遞減
+    translate(random(-shake, shake), random(-shake, shake));
+    screenShakeTimer -= deltaTime / 1000;
+  }
+
   // 根據場景階段選擇背景
   let currentBg = bgForest;
   if (sceneStage === 2 && bgFlower && bgFlower.width) currentBg = bgFlower;
@@ -289,13 +592,24 @@ function draw() {
     // 放慢 left sprite 動畫
     leftSprite.animFPS = Math.max(4, Math.floor(ANIM_FPS * 0.5));
   }
-  // 初始化右側精靈（all8）
-  if (all8Sheet && all8Sheet.width && !rightSprite) {
-    rightSprite = new NonControlledSprite(RIGHT_X(), baselineY, all8Sheet, ALL8_FRAME_COUNT);
-    // 放慢 right sprite 動畫
-    rightSprite.animFPS = Math.max(4, Math.floor(ANIM_FPS * 0.5));
-    rightSprite.dialogText = '';
+
+  // -- 新增 fallback：當 all7 不存在但 all14 / all13 / all11 有載入時也建立 leftSprite --
+  if (!leftSprite) {
+    if (all14Sheet && all14Sheet.width) {
+      leftSprite = new NonControlledSprite(LEFT_X(), baselineY, all14Sheet, ALL14_FRAME_COUNT);
+      leftSprite.animFPS = Math.max(4, Math.floor(EFFECTIVE_ANIM_FPS));
+      console.log('Fallback: created leftSprite from all14Sheet');
+    } else if (all13Sheet && all13Sheet.width) {
+      leftSprite = new NonControlledSprite(LEFT_X(), baselineY, all13Sheet, ALL13_FRAME_COUNT);
+      leftSprite.animFPS = Math.max(4, Math.floor(EFFECTIVE_ANIM_FPS));
+      console.log('Fallback: created leftSprite from all13Sheet');
+    } else if (all11Sheet && all11Sheet.width) {
+      leftSprite = new NonControlledSprite(LEFT_X(), baselineY, all11Sheet, ALL11_FRAME_COUNT);
+      leftSprite.animFPS = Math.max(4, Math.floor(ANIM_FPS * 0.5));
+      console.log('Fallback: created leftSprite from all11Sheet');
+    }
   }
+  
   // 若非騎乘模式，才允許鍵盤控制移動
   if (!ridingMode) {
     if (movingRight) {
@@ -424,14 +738,6 @@ function draw() {
           leftSprite._usingTemp = false;
           leftSprite.animFPS = Math.max(4, Math.floor(EFFECTIVE_ANIM_FPS)); // 左側角色保持較慢動畫
         }
-        // 計算顯示尺寸與位置（縮小顯示）
-        const fW = Math.floor(all14Sheet.width / ALL14_FRAME_COUNT);
-        const fH = all14Sheet.height || 40;
-        const scale = 0.6; // 縮小倍率，可調
-        drawW = Math.max(1, Math.floor(fW * scale));
-        drawH = Math.max(1, Math.floor(fH * scale));
-        drawX = Math.floor(width / 3); // 左側約 1/3
-        drawY = baselineY + Math.floor(frameH * 0.15);
       } else if (all13Sheet && all13Sheet.width) {
         // fallback 使用 all13
         if (leftSprite.sheet !== all13Sheet) {
@@ -445,23 +751,23 @@ function draw() {
           leftSprite._usingTemp = false;
           leftSprite.animFPS = Math.max(4, Math.floor(EFFECTIVE_ANIM_FPS));
         }
-        const fW = Math.floor(all13Sheet.width / ALL13_FRAME_COUNT);
-        const fH = all13Sheet.height || 24;
-        const scale = 0.6;
-        drawW = Math.max(1, Math.floor(fW * scale));
-        drawH = Math.max(1, Math.floor(fH * scale));
-        drawX = Math.floor(width / 3);
-        drawY = baselineY + Math.floor(frameH * 0.15);
       } else {
         // 若兩者皆未載入，隱藏左側顯示
-        drawW = 0;
-        drawH = 0;
       }
     }
     // 若主角靠近 leftSprite，暫時切換到 all9
     const distLeft = Math.abs(posX - LEFT_X());
     // 觸發問答：Scene 1 直接觸發；Scene 2 需按下兩次空白鍵後觸發
-    const canTrigger = (sceneStage === 1) || (sceneStage === 2 && spaceKeyCount >= 2);
+    // 且當 all12 出現後（達成答對題數），就不再觸發問答
+    let canTrigger = false;
+    if (sceneStage === 1) {
+      canTrigger = (correctAnswerCount < 3);
+    } else if (sceneStage === 2) {
+      canTrigger = (spaceKeyCount >= 2 && scene2CorrectCount < 3);
+    } else if (sceneStage === 3) {
+      canTrigger = (!ridingMode && scene3CorrectCount < 2);
+    }
+
     if (canTrigger && distLeft <= PROXIMITY_DIST && quizState === 'IDLE') {
       // --- 觸發問答（不切換精靈）---
       quizState = 'ASKING';
@@ -474,7 +780,13 @@ function draw() {
         let leftOrigH = (leftSprite && leftSprite._origFrameH) ? leftSprite._origFrameH : frameH;
         // Scene 2 時，all11 顯示大小被強制為 all7 大小，故輸入框位置也需參考 all7 高度
         if (sceneStage === 2 && all7Sheet && all7Sheet.height) leftOrigH = all7Sheet.height;
-        const displayH_local = Math.floor(leftOrigH * LEFT_SCALE);
+        
+        let displayH_local = Math.floor(leftOrigH * LEFT_SCALE);
+        // Scene 3 (all14) 特殊處理：放大 4 倍，高度約 160
+        if (sceneStage === 3 && leftSprite.sheet === all14Sheet) {
+            displayH_local = 160;
+        }
+
         const inputX = Math.floor(canvasLeft + LEFT_X() - 145); // 調整X座標以置中
         // 將輸入框定位在角色下方 (baselineY 是中心，加上一半高度即為底部，再加 20px 間距)
         const inputY = Math.floor(canvasTop + baselineY + (displayH_local / 2) + 20);
@@ -581,11 +893,11 @@ function draw() {
         // 計算顯示尺寸與位置（縮小顯示）
         const fW = Math.floor(all14Sheet.width / ALL14_FRAME_COUNT);
         const fH = all14Sheet.height || 40;
-        const scale = 0.6; // 縮小倍率，可調
+        const scale = 4.0; // 放大顯示 (因原圖高僅 40px)
         drawW = Math.max(1, Math.floor(fW * scale));
         drawH = Math.max(1, Math.floor(fH * scale));
-        drawX = Math.floor(width / 3); // 左側約 1/3
-        drawY = baselineY + Math.floor(frameH * 0.15);
+        drawX = LEFT_X(); // 改回跟前兩階段一樣的位置 (1/4)
+        drawY = baselineY; // 改回基準線高度
       } else if (all13Sheet && all13Sheet.width) {
         // fallback 使用 all13
         if (leftSprite.sheet !== all13Sheet) {
@@ -616,7 +928,10 @@ function draw() {
     // 繪製左側精靈
     if (drawW > 0 && drawH > 0) {
       // Scene 2 (all11) 預設面向左，若主角在右側則翻轉面向右
-      const flip = (sceneStage === 2 && posX > LEFT_X());
+      // Scene 3 (all14) 預設面向右，若主角在左側則翻轉面向左
+      let flip = false;
+      if (sceneStage === 2) flip = (posX > LEFT_X());
+      if (sceneStage === 3) flip = (posX < LEFT_X());
       leftSprite.draw(drawX, drawY, drawW, drawH, flip);
     }
   }
@@ -624,7 +939,15 @@ function draw() {
   // 如果正在顯示回饋，則計時
   if (quizState === 'SHOWING_FEEDBACK') {
     feedbackTimer += dt;
-    if (feedbackTimer > 3) { // 顯示回饋 3 秒，結束後恢復原本精靈與狀態
+    if (feedbackTimer > 1.2) { // 顯示回饋 1.2 秒，結束後恢復原本精靈與狀態
+      if (sceneStage === 3 && scene3CorrectCount >= 2) {
+        gameEnded = true;
+      }
+      // 檢查鑰匙是否用完
+      if (playerKeys <= 0) {
+        gameEnded = true;
+      }
+
       quizState = 'IDLE';
       feedbackTimer = 0;
       if (leftSprite) leftSprite.restoreOriginalSheet();
@@ -756,8 +1079,7 @@ function draw() {
       rewardSprite.x = targetX;
       rewardSprite.y = targetY;
       
-      // 顯示對話框 "跟我走吧"
-      rewardTimer += dt;
+      // 顯示對話框
       push();
       rectMode(CENTER);
       fill(255);
@@ -767,14 +1089,15 @@ function draw() {
       fill(0);
       textAlign(CENTER, CENTER);
       textSize(14);
-      text("跟我走吧", rewardSprite.x, rewardSprite.y - 60);
+      text("按 ↓ 騎乘", rewardSprite.x, rewardSprite.y - 60);
       pop();
-
-      // 2秒後進入騎乘模式
-      if (rewardTimer > 2.0 && !spaceActive) {
-        rewardSprite.state = 'RIDING';
-        ridingMode = true;
-      }
+    } else if (rewardSprite.state === 'RIDING_IDLE') {
+      // 騎乘待機：主角已騎上，但尚未出發
+      rewardSprite.x = targetX;
+      rewardSprite.y = targetY;
+      posX = rewardSprite.x;
+      posY = rewardSprite.y - 50;
+      facing = 1;
     } else if (rewardSprite.state === 'RIDING') {
       if (ridingMode) {
         // 騎乘模式：往右跑
@@ -841,8 +1164,7 @@ function draw() {
     } else if (rewardSprite.state === 'SCENE_2_RETURN_ARRIVED') {
       rewardSprite.x = width / 2;
       rewardSprite.y = height - 80;
-      rewardTimer += dt;
-      // 顯示對話框 "我來接你了"
+      // 顯示對話框
       push();
       rectMode(CENTER);
       fill(255);
@@ -852,13 +1174,14 @@ function draw() {
       fill(0);
       textAlign(CENTER, CENTER);
       textSize(14);
-      text("我來接你了", rewardSprite.x, rewardSprite.y - 60);
+      text("按 ↓ 騎乘", rewardSprite.x, rewardSprite.y - 60);
       pop();
-
-      if (rewardTimer > 2.0) {
-        rewardSprite.state = 'SCENE_2_RETURN_RIDING';
-        ridingMode = true;
-      }
+    } else if (rewardSprite.state === 'SCENE_2_RIDING_IDLE') {
+      rewardSprite.x = width / 2;
+      rewardSprite.y = height - 80;
+      posX = rewardSprite.x;
+      posY = rewardSprite.y - 50;
+      facing = 1;
     } else if (rewardSprite.state === 'SCENE_2_RETURN_RIDING') {
       // 騎乘並往畫面外跑
       rewardSprite.x += 300 * dt;
@@ -942,10 +1265,14 @@ function draw() {
         // Scene 2: all11 繪製高度約為 200 (all7 height * 0.7)
         const charH = (all7Sheet && all7Sheet.height) ? (all7Sheet.height * LEFT_SCALE) : 200;
         bubbleY = baselineY - charH - 20;
+      } else if (sceneStage === 3 && leftSprite.sheet === all14Sheet) {
+          // Scene 3: all14 放大 4 倍，高度約 160，將對話框移至角色上方
+          const charH = 160;
+          bubbleY = baselineY - (charH / 2) - 40;
     }
 
-    if (dialogActive && (sceneStage === 1 || sceneStage === 2)) {
-        // Scene 1 & 2: 繪製觸發者的對話氣泡
+    if (dialogActive && (sceneStage === 1 || sceneStage === 2 || sceneStage === 3)) {
+        // Scene 1 & 2 & 3: 繪製觸發者的對話氣泡
         push();
         rectMode(CENTER);
         fill(255);
@@ -960,21 +1287,28 @@ function draw() {
         text(promptText, bubbleX, bubbleY);
         pop();
     // 修改：當正在顯示回饋時 (SHOWING_FEEDBACK)，不要進入此區塊，以免清除右邊角色的回饋文字
-    } else if (sceneStage === 2 && all11State === 'IDLE' && quizState !== 'SHOWING_FEEDBACK') {
-        // Scene 2: 當主角靠近時顯示對話
+    // 且若已達成通關條件 (all12 出現)，也不顯示提示
+    } else if (
+      ((sceneStage === 2 && all11State === 'IDLE' && scene2CorrectCount < 3) || 
+       (sceneStage === 3 && !ridingMode && scene3CorrectCount < 2)) 
+      && quizState !== 'SHOWING_FEEDBACK'
+    ) {
+        // Scene 2 & 3: 當主角靠近時顯示對話
         const distLeft = Math.abs(posX - LEFT_X());
         if (distLeft <= PROXIMITY_DIST) {
             // 若按下兩次空白鍵(回答當然)，改變對話
             let txt = "準備好新的挑戰了嗎?";
-            if (spaceKeyCount >= 2) {
+            if (sceneStage === 2 && spaceKeyCount >= 2) {
                 txt = "繼續回答右邊題目！";
+            } else if (sceneStage === 3) {
+                txt = "請回答右邊的問題！";
             }
             push();
             textSize(14);
             const txtW = textWidth(txt) + 20;
             const txtH = 36;
             rectMode(CENTER);
-            fill('#FFDDDD'); // 使用指定的淺粉色背景
+            fill(255); // 背景顏色跟第一階段一樣 (白色)
             stroke(0);
             strokeWeight(1);
             rect(bubbleX, bubbleY, txtW, txtH, 6);
@@ -984,10 +1318,9 @@ function draw() {
             text(txt, bubbleX, bubbleY);
             pop();
 
-            // 控制右邊角色文字顯示
+            // 控制右邊角色文字顯示：只要靠近就一直顯示
             if (rightSprite) {
-                rightSprite.alwaysShow = false;
-                rightSprite.dialogText = "";
+                rightSprite.alwaysShow = true;
             }
         } else {
             // 離開範圍，隱藏右邊文字
@@ -1021,21 +1354,94 @@ function draw() {
   push();
   textAlign(LEFT, TOP);
   textSize(20);
-  fill(0);
+  fill(255);
   noStroke();
   // 若想微調位置，可更改 x,y（目前為距離邊緣 8px）
-  text('41470027 王瑀瑄', 8, 8);
+  text('414730027 王瑀瑄', 8, 8);
   pop();
+
+  // 在右上角顯示鑰匙 (黃色圖案)
+  for (let i = 0; i < playerKeys; i++) {
+    push();
+    // 從右向左排列，每個間隔 40px
+    let kx = width - 40 - (i * 40);
+    let ky = 30;
+    translate(kx, ky);
+    rotate(3 * PI / 4); // 斜著擺放 (右上-左下)
+    
+    // 鑰匙樣式
+    fill(255, 215, 0); // 金黃色
+    stroke(0);
+    strokeWeight(1);
+    
+    // 鑰匙頭
+    ellipse(-8, 0, 14, 14);
+    // 鑰匙桿
+    rectMode(CORNER);
+    rect(-2, -3, 20, 6);
+    // 鑰匙齒
+    rect(10, 3, 3, 5);
+    rect(15, 3, 3, 3);
+    
+    // 鑰匙孔 (裝飾)
+    fill(255, 255, 200); // 淺色孔
+    noStroke();
+    ellipse(-8, 0, 5, 5);
+    
+    pop();
+  }
+
+  // 螢幕閃爍效果 (答對/答錯時的視覺回饋)
+  if (screenFlashTimer > 0) {
+    push();
+    // 稍微擴大範圍以覆蓋震動時的邊緣
+    translate(-50, -50);
+    noStroke();
+    let alphaVal = map(screenFlashTimer, 0, 0.5, 0, 150);
+    if (screenFlashColor) {
+      fill(red(screenFlashColor), green(screenFlashColor), blue(screenFlashColor), alphaVal);
+      rect(0, 0, width + 100, height + 100);
+    }
+    pop();
+    screenFlashTimer -= deltaTime / 1000;
+  }
+
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   baselineY = height * (2 / 3);
   posY = baselineY;
+  if (startButton) {
+    startButton.position(width / 2 - 60, height / 2 + 100);
+  }
+  if (viewNotesButton) {
+    viewNotesButton.position(width / 2 - 60, height / 2 + 100);
+  }
+  if (tryAgainButton) {
+    tryAgainButton.position(width / 2 - 60, height / 2 + 100);
+  }
+  if (playAgainButton) {
+    playAgainButton.position(width / 2 - 60, height / 2 + 160);
+  }
+  if (notesContainer) {
+    notesContainer.size(windowWidth, windowHeight);
+  }
 }
 
 function keyPressed() {
   if (keyCode === RIGHT_ARROW) {
+    // 檢查是否處於騎乘待機狀態，若是則按右鍵開始移動
+    if (rewardSprite) {
+      if (rewardSprite.state === 'RIDING_IDLE') {
+        rewardSprite.state = 'RIDING';
+        return;
+      } else if (rewardSprite.state === 'SCENE_2_RIDING_IDLE') {
+        rewardSprite.state = 'SCENE_2_RETURN_RIDING';
+        return;
+      }
+    }
+
     movingRight = true;
     // 切換到行走動畫從頭開始
     currentFrame = 0;
@@ -1083,6 +1489,19 @@ function keyPressed() {
       effects.push(e);
     }
   } else if (keyCode === DOWN_ARROW) {
+    // 檢查是否處於獎勵坐騎互動狀態
+    if (rewardSprite) {
+      if (rewardSprite.state === 'ARRIVED') {
+        rewardSprite.state = 'RIDING_IDLE';
+        ridingMode = true;
+        return; // 攔截按鍵，不發射投射物
+      } else if (rewardSprite.state === 'SCENE_2_RETURN_ARRIVED') {
+        rewardSprite.state = 'SCENE_2_RIDING_IDLE';
+        ridingMode = true;
+        return;
+      }
+    }
+
     // 發射投射物（all10），若找不到 all10 圖檔則發射一個 fallback 投射物（用簡單圖形顯示）
     const startX = posX + (facing > 0 ? (frameW / 2 + 10) : -(frameW / 2 + 10));
     const projSheet = (all10Sheet && all10Sheet.width) ? all10Sheet : null;
@@ -1114,16 +1533,50 @@ function handleDialogSubmit() {
   if (quizState === 'ASKING' && currentQuestionRow) {
     const correctAnswer = currentQuestionRow.getString('答案');
     if (val === correctAnswer) {
+      playSound('15/正確.mp3');
       rightSprite.dialogText = currentQuestionRow.getString('答對時的回饋');
       correctAnswerCount++;
+      
+      // 答對特效：綠色閃爍
+      screenFlashColor = color(0, 255, 0);
+      screenFlashTimer = 0.5;
+
       if (sceneStage === 2) {
         scene2CorrectCount++;
+      } else if (sceneStage === 3) {
+        scene3CorrectCount++;
       }
     } else {
+      playSound('15/錯誤.mp3');
       let wrongFeedback = currentQuestionRow.getString('答錯時的回饋');
       // 答錯時加入提示 (不限階段，確保提示能出現)
       const hint = currentQuestionRow.getString('提示文字');
       if (hint) wrongFeedback += ' ' + hint;
+      
+      // 扣除鑰匙
+      playerKeys--;
+
+      // 答錯特效：使用 all10 在主角位置顯示，並加強效果 (浮誇一點)
+      if (all10Sheet && all10Sheet.width) {
+        // 產生多個放大版的特效
+        for (let i = 0; i < 8; i++) { // 增加數量
+          const ox = random(-60, 60);
+          const oy = random(-60, 60);
+          const s = random(1.5, 3.0); // 隨機放大 1.5 ~ 3.0 倍
+          const e = new Effect(posX + ox, posY - 50 + oy, all10Sheet, ALL10_FRAME_COUNT, null, 0, s);
+          effects.push(e);
+        }
+      }
+
+      // 觸發震動
+      screenShakeAmount = 20;
+      screenShakeTimer = 0.5;
+
+      if (playerKeys <= 0) {
+        wrongFeedback += " (鑰匙已用完)";
+      } else {
+        wrongFeedback += " (損失一把鑰匙)";
+      }
       
       rightSprite.dialogText = wrongFeedback;
       // 答錯時：左右角色切換為 all9，連續重複播放（使用前 8 張），並放慢速度
@@ -1295,12 +1748,14 @@ class NonControlledSprite {
 
 // 簡單的一次性特效類別
 class Effect {
-  constructor(x, y, sheet, frameCount, onFinish, vx = 0) {
+  constructor(x, y, sheet, frameCount, onFinish, vx = 0, scale = 1.0, tintColor = null) {
     this.x = x;
     this.y = y;
     this.vx = vx;
     this.sheet = sheet;
     this.frameCount = frameCount;
+    this.scale = scale;
+    this.tintColor = tintColor;
     this.frameW = Math.floor(sheet.width / frameCount);
     this.frameH = sheet.height;
     this.currentFrame = 0;
@@ -1327,9 +1782,75 @@ class Effect {
     // 確保不會超過最大影格
     const frameIndex = Math.min(this.currentFrame, this.frameCount - 1);
     const sx = frameIndex * this.frameW;
+    const drawW = this.frameW * this.scale;
+    const drawH = this.frameH * this.scale;
     push();
     translate(this.x, this.y);
-    image(this.sheet, 0, 0, this.frameW, this.frameH, sx, 0, this.frameW, this.frameH);
+    if (this.tintColor) tint(this.tintColor); // 套用顏色濾鏡
+    image(this.sheet, 0, 0, drawW, drawH, sx, 0, this.frameW, this.frameH);
+    if (this.tintColor) noTint(); // 恢復
+    pop();
+  }
+}
+
+// 安全播放音效函式 (使用 HTML5 Audio，不依賴 p5.sound，避免載入失敗導致當機)
+function playSound(path) {
+  try {
+    const audio = new Audio(path);
+    audio.volume = 0.5;
+    audio.play().catch(e => {
+      // 忽略自動播放限制或找不到檔案的錯誤
+      console.log('Sound play prevented or file missing:', path);
+    });
+  } catch (e) {
+    console.log('Audio error:', e);
+  }
+}
+
+// 新增：煙火粒子特效類別 (用於 Finish 畫面)
+class Firework {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.particles = [];
+    this.finished = false;
+    const c = color(random(150, 255), random(150, 255), random(150, 255));
+    // 產生粒子
+    for (let i = 0; i < 40; i++) {
+      const angle = random(TWO_PI);
+      const speed = random(50, 150);
+      this.particles.push({
+        x: 0,
+        y: 0,
+        vx: cos(angle) * speed,
+        vy: sin(angle) * speed,
+        alpha: 255,
+        col: c
+      });
+    }
+  }
+
+  update(dt) {
+    let alive = false;
+    for (let p of this.particles) {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 80 * dt; // 重力效果
+      p.alpha -= 200 * dt; // 淡出
+      if (p.alpha > 0) alive = true;
+    }
+    if (!alive) this.finished = true;
+  }
+
+  draw() {
+    push();
+    translate(this.x, this.y);
+    noStroke();
+    for (let p of this.particles) {
+      if (p.alpha <= 0) continue;
+      fill(red(p.col), green(p.col), blue(p.col), p.alpha);
+      ellipse(p.x, p.y, 4, 4);
+    }
     pop();
   }
 }
