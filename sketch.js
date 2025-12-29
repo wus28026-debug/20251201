@@ -15,6 +15,7 @@ const SPEED = 220; // 移動速度 (px/s)
 // 背景樹林圖片（從 background 資料夾及常見檔名嘗試載入）
 let bgForest = null;
 const BG_FOREST_PATHS = [
+  '背景/樹林.jpg', // 根據紀錄，這是正確路徑，移到最前面
   'background/forest.png', 'background/forest.jpg', 'background/forest.jpeg',
   'background/forest1.png', 'background/forest1.jpg',
   'forest.png', 'forest.jpg',
@@ -22,7 +23,7 @@ const BG_FOREST_PATHS = [
   '../background/forest.png', '../background/forest.jpg',
   'Background/forest.png', 'background/Forest.png',
   // 中文資料夾/檔名（你的情況）
-  '背景/樹林.jpg', '背景/樹林.png', '背景/森林.jpg', '背景/森林.png',
+  '背景/樹林.png', '背景/森林.jpg', '背景/森林.png',
   './背景/樹林.jpg', './背景/樹林.png', '../背景/樹林.jpg',
   '背景/樹林.jpeg'
 ];
@@ -138,15 +139,15 @@ const ALL14_FRAME_COUNT = 18;
 function preload() {
   // 嘗試幾個常見路徑（root, 1/, 2/）以提高成功率
   // 嘗試更多常見子資料夾（root, 1/, 2/, 3/, 4/），以涵蓋工作區中可能的位置
-  const idlePaths = ['all1.png', '1/all1.png', '2/all1.png', '3/all1.png', '4/all1.png'];
-  const walkPaths = ['all2.png', '1/all2.png', '2/all2.png', '3/all2.png', '4/all2.png'];
-  const jumpPaths = ['all4.png', '1/all4.png', '2/all4.png', '3/all4.png', '4/all4.png'];
+  const idlePaths = ['1/all1.png', 'all1.png', '2/all1.png', '3/all1.png', '4/all1.png'];
+  const walkPaths = ['2/all2.png', 'all2.png', '1/all2.png', '3/all2.png', '4/all2.png'];
+  const jumpPaths = ['4/all4.png', 'all4.png', '1/all4.png', '2/all4.png', '3/all4.png'];
   const spacePaths = ['3/all3.png', 'all3.png', '1/all3.png', '2/all3.png', '4/all3.png', '12/1/all3.png', 'all3/all3.png'];
 
-  const all7Paths = ['all7.png', '1/all7.png', '2/all7.png', '3/all7.png', '4/all7.png', '7/all7.png'];
-  const all8Paths = ['all8.png', '1/all8.png', '2/all8.png', '3/all8.png', '4/all8.png', '8/all8.png'];
-  const all9Paths = ['all9.png', '1/all9.png', '2/all9.png', '3/all9.png', '4/all9.png', '9/all9.png'];
-  const all10Paths = ['all10.png', '1/all10.png', '2/all10.png', '3/all10.png', '4/all10.png', '10/all10.png'];
+  const all7Paths = ['7/all7.png', 'all7.png', '1/all7.png', '2/all7.png', '3/all7.png', '4/all7.png'];
+  const all8Paths = ['8/all8.png', 'all8.png', '1/all8.png', '2/all8.png', '3/all8.png', '4/all8.png'];
+  const all9Paths = ['9/all9.png', 'all9.png', '1/all9.png', '2/all9.png', '3/all9.png', '4/all9.png'];
+  const all10Paths = ['10/all10.png', 'all10.png', '1/all10.png', '2/all10.png', '3/all10.png', '4/all10.png'];
 
   // all14 sprite (第三階段左側精靈)
   const all14Paths = ['14/all14.png', 'all14.png', '14/all14.jpg', '14/all14.png'];
@@ -255,7 +256,7 @@ function setup() {
   startButton.style('cursor', 'pointer');
   startButton.style('border', '2px solid #000');
   startButton.mousePressed(() => {
-    playSound('click.mp3');
+    playSound('15/click.mp3');
 
     // 播放背景音樂 (使用 HTML5 Audio 以避免網頁卡住)
     if (!bgMusicAudio) {
@@ -281,7 +282,7 @@ function setup() {
   tryAgainButton.style('border', '2px solid #000');
   tryAgainButton.hide();
   tryAgainButton.mousePressed(() => {
-    playSound('click.mp3');
+    playSound('15/click.mp3');
     // 重置遊戲狀態
     playerKeys = 3;
     sceneStage = 1;
@@ -314,7 +315,7 @@ function setup() {
   playAgainButton.style('border', '2px solid #000');
   playAgainButton.hide();
   playAgainButton.mousePressed(() => {
-    playSound('click.mp3');
+    playSound('15/click.mp3');
     // 重置遊戲狀態
     playerKeys = 3;
     sceneStage = 1;
@@ -381,7 +382,7 @@ function setup() {
   notesContainer.style('z-index', '10000');
 
   const iframe = createElement('iframe');
-  iframe.attribute('src', 'https://hackmd.io/nhhulwzpQ3CBudmJjMim2g');
+  iframe.attribute('src', 'https://hackmd.io/@BaN-RevzTta1yPjQLaJ-Ew/B18UMtcZbl');
   iframe.style('width', '90%');
   iframe.style('height', '85%');
   iframe.style('border', 'none');
@@ -439,8 +440,8 @@ function draw() {
   if (gameEnded) {
     // 播放結束音效 (只播一次)
     if (!gameOverSoundPlayed) {
-      if (playerKeys <= 0) playSound('fail.mp3');
-      else playSound('win.mp3');
+      if (playerKeys <= 0) playSound('15/fail.mp3');
+      else playSound('15/win.mp3');
       gameOverSoundPlayed = true;
     }
 
