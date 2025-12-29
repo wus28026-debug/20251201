@@ -227,6 +227,16 @@ function preload() {
 function setup() {
   canvasElem = createCanvas(windowWidth, windowHeight);
   imageMode(CENTER);
+  
+  // [新增] 防止瀏覽器找不到 favicon.ico 而報錯
+  let link = document.querySelector("link[rel~='icon']");
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = 'data:image/x-icon;base64,'; // 設定為空白圖示
+
   noSmooth();
   baselineY = height * (2 / 3);
   posX = width / 2;
@@ -256,7 +266,7 @@ function setup() {
   startButton.style('cursor', 'pointer');
   startButton.style('border', '2px solid #000');
   startButton.mousePressed(() => {
-    playSound('15/click.mp3');
+    // playSound('15/click.mp3'); // 檔案不存在，暫時註解以消除 404 錯誤
 
     // 播放背景音樂 (使用 HTML5 Audio 以避免網頁卡住)
     if (!bgMusicAudio) {
@@ -282,7 +292,7 @@ function setup() {
   tryAgainButton.style('border', '2px solid #000');
   tryAgainButton.hide();
   tryAgainButton.mousePressed(() => {
-    playSound('15/click.mp3');
+    // playSound('15/click.mp3'); // 檔案不存在，暫時註解
     // 重置遊戲狀態
     playerKeys = 3;
     sceneStage = 1;
@@ -315,7 +325,7 @@ function setup() {
   playAgainButton.style('border', '2px solid #000');
   playAgainButton.hide();
   playAgainButton.mousePressed(() => {
-    playSound('15/click.mp3');
+    // playSound('15/click.mp3'); // 檔案不存在，暫時註解
     // 重置遊戲狀態
     playerKeys = 3;
     sceneStage = 1;
